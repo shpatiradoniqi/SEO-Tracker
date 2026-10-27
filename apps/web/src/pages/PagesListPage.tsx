@@ -62,9 +62,9 @@ export function PagesListPage() {
 
       {list.isError && <p role="alert" className="text-danger">Couldn’t load pages: {(list.error as Error).message}</p>}
 
-      <div className="overflow-x-auto rounded-xl border border-line bg-surface">
-        <table className="w-full min-w-[760px] text-left">
-          <thead className="border-b border-line text-sm text-muted">
+      <div className="rounded-xl border border-line bg-surface md:overflow-x-auto">
+        <table className="block w-full text-left md:table md:min-w-[760px]">
+          <thead className="hidden border-b border-line text-sm text-muted md:table-header-group">
             <tr>
               <th className="px-4 py-3 font-medium">Page</th>
               <th className="px-4 py-3 font-medium">Likely keywords</th>
@@ -72,21 +72,21 @@ export function PagesListPage() {
               <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Best position</th>
             </tr>
           </thead>
-          <tbody className={list.isPlaceholderData ? 'opacity-60' : ''}>
-            {list.isLoading && <tr><td colSpan={4} className="px-4 py-8 text-muted">Loading pages…</td></tr>}
+          <tbody className={`block md:table-row-group ${list.isPlaceholderData ? 'opacity-60' : ''}`}>
+            {list.isLoading && <tr className="block md:table-row"><td colSpan={4} className="px-4 py-8 text-muted">Loading pages…</td></tr>}
             {list.data?.items.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-8 text-muted">
+              <tr className="block md:table-row"><td colSpan={4} className="block px-4 py-8 text-muted md:table-cell">
                 {q || clientId ? 'No pages match these filters.' : <>No pages yet. <Link className="text-link underline" to="/clients/new">Add a client</Link> to crawl its blog.</>}
               </td></tr>
             )}
             {list.data?.items.map((p) => (
-              <tr key={p.id} className="border-b border-line align-top last:border-0 hover:bg-bg">
-                <td className="max-w-md px-4 py-3">
+              <tr key={p.id} className="grid grid-cols-[1fr_auto] border-b border-line align-top last:border-0 hover:bg-bg md:table-row">
+                <td className="col-span-2 max-w-md px-4 pt-3 md:table-cell md:py-3">
                   <Link to={`/pages/${p.id}`} className="font-semibold text-link hover:underline">{p.title ?? p.url}</Link>
                   <div className="truncate text-sm text-url" title={p.url}>{p.url.replace(/^https?:\/\//, '')}</div>
                   {!clientId && <div className="text-xs text-muted">{p.clientName}</div>}
                 </td>
-                <td className="px-4 py-3">
+                <td className="col-span-2 px-4 py-2 md:table-cell md:py-3">
                   <ul className="flex flex-wrap gap-1.5">
                     {p.keywords.map((k) => (
                       <li key={k.term} className="inline-flex items-center gap-1.5 rounded-full border border-line py-0.5 pl-2.5 pr-0.5 text-sm">
@@ -95,10 +95,11 @@ export function PagesListPage() {
                     ))}
                   </ul>
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 pb-3 md:table-cell md:py-3 md:text-right">
+                  <span className="text-sm text-muted md:hidden">Issues: </span>
                   <span className={p.issueCount ? 'font-semibold text-danger' : 'text-muted'}>{p.issueCount}</span>
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 pb-3 text-right md:table-cell md:py-3">
                   <RankBadge position={p.bestPosition} />
                   <div className="whitespace-nowrap text-xs text-muted">{p.positionDate ? formatTimestamp(p.positionDate) : 'Not tracked yet'}</div>
                 </td>
