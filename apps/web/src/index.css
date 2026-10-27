@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* Palette borrowed from a search results page: link-blue titles, green URLs.
+   Rank bands map to where a result would appear: top 3, rest of page 1, page 2, beyond. */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #1c2330;
+  --muted: #5d6675;
+  --line: #dde1e7;
+  --link: #1a4fd6;
+  --url: #0d7a4c;
+  --top3: #0d7a4c;
+  --page1: #1a4fd6;
+  --page2: #a86a12;
+  --beyond: #6b7280;
+  --danger: #b42318;
+  --focus: #1a4fd6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161d;
+    --surface: #1a1f28;
+    --ink: #e6e9ee;
+    --muted: #9aa3b2;
+    --line: #2c3340;
+    --link: #8ab4ff;
+    --url: #5cc795;
+    --top3: #5cc795;
+    --page1: #8ab4ff;
+    --page2: #e0a84a;
+    --beyond: #9aa3b2;
+    --danger: #ff8a80;
+    --focus: #8ab4ff;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-link: var(--link);
+  --color-url: var(--url);
+  --color-top3: var(--top3);
+  --color-page1: var(--page1);
+  --color-page2: var(--page2);
+  --color-beyond: var(--beyond);
+  --color-danger: var(--danger);
+  --font-sans: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html { background: var(--bg); color: var(--ink); }
+body { font-family: var(--font-sans); font-size: 15px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+input, select, button { font: inherit; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
