@@ -32,7 +32,7 @@ export function isPrivateAddress(ip: string): boolean {
 }
 
 /** SSRF guard: every hop of every request must resolve only to public addresses. */
-async function assertPublicHost(url: URL): Promise<void> {
+export async function assertPublicHost(url: URL): Promise<void> {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new BlockedHostError(`Unsupported protocol ${url.protocol}`);
   }
