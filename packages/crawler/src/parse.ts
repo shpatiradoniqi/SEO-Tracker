@@ -16,6 +16,7 @@ export interface ParsedPage {
   headings: Array<{ level: number; text: string }>;
   images: { total: number; missingAlt: number };
   jsonLdTypes: string[];
+  authors: string[];
   publishedTime: string | null;
   bodyText: string;
   wordCount: number;
@@ -25,14 +26,15 @@ const BLOCK_TAGS = 'p,div,section,article,main,h1,h2,h3,h4,h5,h6,li,dt,dd,td,th,
 
 const clean = (s: string | undefined | null) => (s ?? '').replace(/\s+/g, ' ').trim() || null;
 
-function collectJsonLdTypes(node: unknown, out: Set<string>): void {
-  if (Array.isArray(node)) return node.forEach((n) => collectJsonLdTypes(n, out));
+function collectJsonLd(node: unknown, types: Set<string>, people: Set<string>): void {
+  if (Array.isArray(node)) return node.forEach((n) => collectJsonLd(n, types, people));
   if (!node || typeof node !== 'object') return;
   const obj = node as Record<string, unknown>;
   const t = obj['@type'];
-  if (typeof t === 'string') out.add(t);
-  if (Array.isArray(t)) t.forEach((x) => typeof x === 'string' && out.add(x));
-  if (obj['@graph']) collectJsonLdTypes(obj['@graph'], out);
+  const list = typeof t === 'string' ? [t] : Array.isArray(t) ? t.filter((x): x is string => typeof x === 'string') : [];
+  list.forEach((x) => types.add(x));
+  if (list.includes('Person') && typeof obj.name === 'string') people.add(obj.name);
+  for (const key of ['@graph', 'author']) if (obj[key]) collectJsonLd(obj[key], types, people);
 }
 
 export function parsePage(html: string, url: string, status: number): ParsedPage {
@@ -40,9 +42,12 @@ export function parsePage(html: string, url: string, status: number): ParsedPage
   const meta = (sel: string) => clean($(sel).first().attr('content'));
 
   const types = new Set<string>();
+  const people = new Set<string>();
+  const metaAuthor = clean($('meta[name="author" i]').attr('content'));
+  if (metaAuthor) people.add(metaAuthor);
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
-      collectJsonLdTypes(JSON.parse($(el).text()), types);
+      collectJsonLd(JSON.parse($(el).text()), types, people);
     } catch {
       /* malformed JSON-LD is common; ignore */
     }
@@ -81,6 +86,7 @@ export function parsePage(html: string, url: string, status: number): ParsedPage
     headings,
     images: { total: images.length, missingAlt },
     jsonLdTypes: [...types],
+    authors: [...people],
     publishedTime: meta('meta[property="article:published_time"]'),
     bodyText,
     wordCount: bodyText ? bodyText.split(' ').length : 0,
