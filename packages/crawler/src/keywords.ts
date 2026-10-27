@@ -11,7 +11,8 @@ while who whom why will with within without would yet you your yours yourself
 best top ultimate complete guide guides tips tip step steps easy simple quick everything thing things know need learn
 read article post blog today year years first last next free great good better full examples example list lists vs
 jan feb mar apr jun jul aug sep sept oct nov dec january february march april june july august september october
-november december updated published min mins minute minutes reading`
+november december updated published min mins minute minutes reading
+youre youll youve youd dont doesnt didnt isnt arent wont cant thats whats theres heres lets its im ive`
   .split(/\s+/).filter(Boolean));
 
 const FIELD_WEIGHTS = { title: 3, h1: 3, slug: 2.5, meta: 2, h2: 1.5 } as const;
@@ -94,7 +95,7 @@ function pageSignals(page: ParsedPage, siteBrand: Set<string>): Map<string, Sign
  *         x phrase-length bonus x site-level IDF
  *
  * Phrases must appear in a prominent field (title, H1, slug, meta, H2) or at least 3 times in the body.
- * Single words additionally need to be in the title, H1 or slug: on their own they are too broad.
+ * Single words additionally need to be in the title, H1 and slug together: on their own they are too broad.
  * IDF across the client's pages pushes down terms the whole site uses (e.g. "seo" on an SEO blog).
  * A phrase that overlaps an already-chosen one (contains it or is contained by it) is skipped.
  */
@@ -111,7 +112,8 @@ export function extractKeywords(pages: ParsedPage[], brand: Set<string>, perPage
       const prominent = fieldScore > 0;
       const words = term.split(' ').length;
       if (!prominent && bodyTf < 3) continue;
-      if (words === 1 && !(fields.title || fields.h1 || fields.slug)) continue;
+      // A single word only counts when the page is clearly about it: it is in the title, H1 and URL slug.
+      if (words === 1 && !(fields.title && fields.h1 && fields.slug)) continue;
       if (bodyTf === 0 && !(fields.title || fields.h1)) continue; // must be supported by the content
       const lengthBonus = words === 1 ? 0.7 : words === 2 ? 1.4 : 1.6;
       const idf = n > 1 ? Math.log((n + 1) / ((df.get(term) ?? 0) + 1)) + 1 : 1;
