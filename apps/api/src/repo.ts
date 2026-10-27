@@ -152,3 +152,23 @@ export async function getJob(userId: string, jobId: string) {
   );
   return job ?? null;
 }
+
+/** Queues a new crawl for one of the user's clients unless one is already running. */
+export async function requeueCrawl(userId: string, clientId: string) {
+  const { rows: [owned] } = await pool.query('SELECT id FROM clients WHERE id = $1 AND user_id = $2', [clientId, userId]);
+  if (!owned) return { status: 'not_found' as const };
+  const { rows: [job] } = await pool.query<{ id: string }>(
+    `INSERT INTO crawl_jobs(client_id)
+     SELECT $1 WHERE NOT EXISTS (
+       SELECT 1 FROM crawl_jobs WHERE client_id = $1 AND status IN ('queued', 'discovering', 'crawling'))
+     RETURNING id`,
+    [clientId],
+  );
+  return job ? { status: 'queued' as const, jobId: job.id } : { status: 'busy' as const };
+}
+
+/** Deletes a client and, through ON DELETE CASCADE, its pages, keywords links, issues, snapshots and jobs. */
+export async function deleteClient(userId: string, clientId: string): Promise<boolean> {
+  const { rowCount } = await pool.query('DELETE FROM clients WHERE id = $1 AND user_id = $2', [clientId, userId]);
+  return (rowCount ?? 0) > 0;
+}

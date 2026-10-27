@@ -80,6 +80,12 @@ describe('tenancy: user A cannot reach user B data by any route', () => {
     expect((await asA('GET', `/api/pages?q=b-${tag}`)).json().items).toEqual([]);
     expect((await asA('GET', `/api/clients`)).json().map((c: { id: string }) => c.id)).not.toContain(ids.bClient);
   });
+  it('cannot recrawl or delete B\'s client', async () => {
+    expect((await asA('POST', `/api/clients/${ids.bClient}/crawl`)).statusCode).toBe(404);
+    expect((await app.inject({ method: 'DELETE', url: `/api/clients/${ids.bClient}`, headers: { cookie: cookieA } })).statusCode).toBe(404);
+    const { rows } = await pool.query('SELECT 1 FROM clients WHERE id = $1', [ids.bClient]);
+    expect(rows).toHaveLength(1);
+  });
   it('malformed ids answer 404, not 500', async () => {
     expect((await asA('GET', '/api/pages/not-a-uuid')).statusCode).toBe(404);
   });
@@ -116,5 +122,9 @@ describe('add client', () => {
     expect(second.statusCode).toBe(409);
     const job = await asA('GET', `/api/crawl-jobs/${first.json().jobId}`);
     expect(job.json().status).toBe('queued');
+    // A second crawl cannot be queued while one is pending; deleting frees the host for re-adding.
+    expect((await asA('POST', `/api/clients/${first.json().clientId}/crawl`)).statusCode).toBe(409);
+    const del = await app.inject({ method: 'DELETE', url: `/api/clients/${first.json().clientId}`, headers: { cookie: cookieA } });
+    expect(del.statusCode).toBe(204);
   });
 });

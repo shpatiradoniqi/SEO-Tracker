@@ -39,6 +39,21 @@ export async function dataRoutes(app: FastifyInstance) {
     return reply.code(202).send(created);
   });
 
+  app.post('/clients/:id/crawl', async (req, reply) => {
+    const id = uuid.safeParse((req.params as { id: string }).id);
+    if (!id.success) return notFound(reply);
+    const result = await repo.requeueCrawl(req.userId!, id.data);
+    if (result.status === 'not_found') return notFound(reply);
+    if (result.status === 'busy') return reply.code(409).send({ error: 'A crawl for this client is already running.' });
+    return reply.code(202).send({ clientId: id.data, jobId: result.jobId });
+  });
+
+  app.delete('/clients/:id', async (req, reply) => {
+    const id = uuid.safeParse((req.params as { id: string }).id);
+    const deleted = id.success && (await repo.deleteClient(req.userId!, id.data));
+    return deleted ? reply.code(204).send() : notFound(reply);
+  });
+
   app.get('/crawl-jobs/:id', async (req, reply) => {
     const id = uuid.safeParse((req.params as { id: string }).id);
     const job = id.success ? await repo.getJob(req.userId!, id.data) : null;
