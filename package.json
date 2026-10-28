@@ -8,7 +8,8 @@
   "scripts": {
     "db:migrate": "npm run migrate -w @seo/api",
     "seed": "npm run seed -w @seo/api",
-    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @seo/api\" \"npm run dev -w @seo/web\"",
+    "dev": "concurrently -n api,worker,web -c blue,magenta,green \"npm run dev -w @seo/api\" \"npm run dev:worker -w @seo/api\" \"npm run dev -w @seo/web\"",
+    "worker": "npm run worker -w @seo/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build -w @seo/web"

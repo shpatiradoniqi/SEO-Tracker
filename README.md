@@ -12,8 +12,10 @@ docker compose up -d --wait     # PostgreSQL 16 on localhost:5432
 npm install
 npm run db:migrate
 npm run seed                    # live-crawls semrush.com and yoast.com, ~1 min; prints the snapshot count
-npm run dev                     # API on :3001, app on http://localhost:5173
+npm run dev                     # API on :3001, crawl worker, app on http://localhost:5173
 ```
+
+In production the crawl worker runs as its own service: `npm run worker` (start as many copies as you like).
 
 If port 5432 is already in use (for example by a local PostgreSQL install), set `DB_PORT=5433` in `.env`, use the same port in `DATABASE_URL`, and run `docker compose up -d --wait` again.
 
@@ -43,7 +45,7 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 
 **Auth:** an httpOnly cookie holding a random token. The database stores only its SHA-256 hash, so a database leak can't hijack sessions. Passwords use scrypt from `node:crypto`, chosen over argon2 so there is no native build step on Windows. Login time doesn't reveal whether an email exists.
 
-**Adding a client:** the URL is validated and normalized, so `www.Yoast.com/` and `yoast.com` are the same site. A unique `(user_id, host)` constraint blocks duplicates. The API returns `202` and queues a job in `crawl_jobs`. A worker claims jobs with `FOR UPDATE SKIP LOCKED` (a Postgres queue, so no Redis) and records progress, which the UI polls. Jobs interrupted by a restart are re-queued. Failures are stored as readable messages, and the client can be retried or removed. Because the server fetches URLs that users type in, every request and redirect hop is checked against private, loopback and metadata IP ranges (SSRF guard).
+**Adding a client:** the URL is validated and normalized, so `www.Yoast.com/` and `yoast.com` are the same site. A unique `(user_id, host)` constraint blocks duplicates. The API returns `202` and queues a job in `crawl_jobs`. A separate worker service (`apps/api/src/worker-main.ts`) claims jobs with `FOR UPDATE SKIP LOCKED` (a Postgres queue, so no Redis) and records progress, which the UI polls. Any number of workers can run. Each running job records its owner and a heartbeat every 10 s; if a worker dies, another one re-queues its jobs after 60 s (up to 3 attempts), and a worker that lost a job can't overwrite the new result. On shutdown a worker finishes or hands back its running jobs. Failures are stored as readable messages, and the client can be retried or removed. Because the server fetches URLs that users type in, every request and redirect hop is checked against private, loopback and metadata IP ranges (SSRF guard).
 
 **Frontend:** React + Vite + TanStack Query + Tailwind + Recharts.
 - The colors borrow from a search results page: blue titles, green URLs. Positions are colored by the results page they would land on.
@@ -53,7 +55,6 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 
 ## Unfinished / next steps
 
-- **Crawl worker:** runs inside the API process. In production it would be its own service; the queue already supports several workers.
 - **Missing protections:** no login rate limiting and no CSRF token. SameSite=Lax cookies and JSON-only endpoints cover the common cases, but I'd add both.
 - **SSRF guard:** checks DNS before connecting, which leaves a small DNS-rebinding window. Pinning the resolved IP in a custom HTTP agent would close it.
 - **Crawling politeness:** the crawler doesn't read `robots.txt` crawl rules or per-host rate limits beyond a concurrency of 3.
