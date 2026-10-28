@@ -1,6 +1,17 @@
 import { XMLParser } from 'fast-xml-parser';
-import { safeFetch } from './http.js';
+import { safeFetch, type FetchOptions, type FetchResult } from './http.js';
+import type { Robots } from './robots.js';
 import { isSameSite } from './url.js';
+
+/** How discovery fetches; the crawler passes one that applies robots.txt rules and per-host throttling. */
+export type Fetcher = (url: string, opts?: FetchOptions) => Promise<FetchResult>;
+
+export interface DiscoveryOptions {
+  maxDepth?: number;
+  fetch?: Fetcher;
+  /** Already-parsed robots.txt of the site; its Sitemap lines are used instead of fetching it again. */
+  robots?: Robots;
+}
 
 export class SitemapNotFoundError extends Error {
   constructor(public readonly tried: string[]) {
@@ -94,7 +105,8 @@ interface Ref { url: string; order: number }
  * 3. If no sitemap looks like a blog, fall back to URLs with blog-like paths, then to every URL
  *    (the crawler's article check filters non-posts out).
  */
-export async function discoverBlogSitemap(websiteUrl: string, maxDepth = 3): Promise<Discovery> {
+export async function discoverBlogSitemap(websiteUrl: string, opts: DiscoveryOptions = {}): Promise<Discovery> {
+  const { maxDepth = 3, fetch: fetchUrl = safeFetch, robots: knownRobots } = opts;
   const base = new URL(websiteUrl);
   const tried: string[] = [];
   const fetched = new Map<string, ParsedSitemap>();
@@ -103,7 +115,7 @@ export async function discoverBlogSitemap(websiteUrl: string, maxDepth = 3): Pro
     if (fetched.has(url)) return fetched.get(url)!;
     tried.push(url);
     try {
-      const res = await safeFetch(url, { accept: 'application/xml,text/xml;q=0.9,*/*;q=0.8', retries: 1 });
+      const res = await fetchUrl(url, { accept: 'application/xml,text/xml;q=0.9,*/*;q=0.8', retries: 1 });
       if (res.status !== 200) return null;
       const parsed = parseSitemap(res.body);
       if (parsed) fetched.set(url, parsed);
@@ -114,11 +126,15 @@ export async function discoverBlogSitemap(websiteUrl: string, maxDepth = 3): Pro
   }
 
   let roots: string[] = [];
-  try {
-    const robots = await safeFetch(new URL('/robots.txt', base).href, { retries: 1 });
-    if (robots.status === 200) roots = parseRobotsSitemaps(robots.body).filter((u) => isSameSite(u, base));
-  } catch {
-    /* no robots.txt is fine */
+  if (knownRobots) {
+    roots = knownRobots.sitemaps.filter((u) => isSameSite(u, base));
+  } else {
+    try {
+      const robots = await fetchUrl(new URL('/robots.txt', base).href, { retries: 1 });
+      if (robots.status === 200) roots = parseRobotsSitemaps(robots.body).filter((u) => isSameSite(u, base));
+    } catch {
+      /* no robots.txt is fine */
+    }
   }
   const defaults = ['/sitemap.xml', '/sitemap_index.xml', '/wp-sitemap.xml', '/sitemap/']
     .map((p) => new URL(p, base).href);

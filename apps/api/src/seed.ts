@@ -4,6 +4,7 @@ import { migrate } from './db/migrate.js';
 import { hashPassword } from './auth/password.js';
 import { replaceClientPages } from './services/persist.js';
 import { regenerateSnapshots } from './services/snapshots.js';
+import { crawlOptionsFromEnv } from './services/crawl-options.js';
 import { normalizeWebsiteUrl } from '@seo/crawler';
 
 const SEED = [
@@ -27,7 +28,14 @@ async function main() {
   const crawls = await Promise.all(
     SEED.map(async (s) => {
       console.log(`Crawling ${s.website} ...`);
-      const result = await crawlSite(s.website);
+      // Sites with a robots.txt Crawl-delay are crawled slowly, so show progress as posts come in.
+      let last = -1;
+      const result = await crawlSite(s.website, {
+        ...crawlOptionsFromEnv(),
+        onProgress: (p) => {
+          if (p.phase === 'crawling' && p.done !== last) console.log(`  ${s.website}: ${(last = p.done)}/${p.found} posts`);
+        },
+      });
       console.log(`  ${s.website}: ${result.pages.length} posts from ${result.discovery.sitemapUrl}`);
       return { ...s, result };
     }),

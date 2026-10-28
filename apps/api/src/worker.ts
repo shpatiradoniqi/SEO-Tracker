@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
-import { crawlSite, SitemapNotFoundError, NoPostsFoundError, BlockedHostError } from '@seo/crawler';
+import { crawlSite, SitemapNotFoundError, NoPostsFoundError, BlockedHostError, RobotsDisallowedError } from '@seo/crawler';
 import { pool, tx } from './db/pool.js';
 import { replaceClientPages } from './services/persist.js';
+import { crawlOptionsFromEnv } from './services/crawl-options.js';
 
 /**
  * Postgres-backed job queue, run by the standalone worker service (src/worker-main.ts).
@@ -57,6 +58,7 @@ export async function reapStale(staleAfterMs = STALE_AFTER_MS): Promise<{ requeu
 function friendlyError(err: unknown): string {
   if (err instanceof SitemapNotFoundError) return err.message;
   if (err instanceof NoPostsFoundError) return err.message;
+  if (err instanceof RobotsDisallowedError) return err.message;
   if (err instanceof BlockedHostError) return 'That address points to a private or reserved network and cannot be crawled.';
   return `Crawl failed: ${err instanceof Error ? err.message : String(err)}`;
 }
@@ -66,6 +68,7 @@ class LostOwnershipError extends Error {}
 export async function runJob(job: ClaimedJob, workerId: string, log: (msg: string) => void, crawl: Crawl = crawlSite): Promise<void> {
   try {
     const { discovery, pages } = await crawl(job.website_url, {
+      ...crawlOptionsFromEnv(),
       onProgress: async (p) => {
         await pool.query(
           `UPDATE crawl_jobs SET status = $3, pages_found = $4, pages_done = $5, sitemap_url = COALESCE($6, sitemap_url),
