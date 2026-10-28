@@ -28,5 +28,24 @@ Execution Time: ~1.3 ms
 
 - The pages list cost depends on pages per user, not on snapshot volume.
 - History cost is proportional to the rows returned (keywords x days in range), thanks to the composite primary key.
-- At tens of millions of snapshots, partition `rank_snapshots` by month on `captured_at` so old partitions can be
-  detached or compressed; the primary key still serves each partition. A daily rollup table would back long-range charts.
+- `rank_snapshots` is partitioned by month on `captured_at` (see below), so old partitions can be
+  detached or compressed; the primary key still serves each partition. The `rank_daily` rollup backs long-range charts.
+
+## After partitioning (migration 004)
+
+`rank_snapshots` is now partitioned by month on `captured_at` (49 monthly partitions: three years back to a year
+ahead, plus a default partition that stays empty). Writers call `ensure_rank_snapshot_partitions(from, to)` before
+inserting. `rank_daily` holds one row per (page keyword, Toronto day): the day's last position, best, worst and
+sample count. `refresh_rank_daily(from_day, to_day, [page_keyword_ids])` rebuilds it after writes.
+
+One page, six keywords, one year (2,190 points), same seed data:
+
+| Path | Planning | Execution | Plan |
+|---|---|---|---|
+| Raw snapshots (ranges up to 92 days) | ~6 ms | ~2.1 ms | Partition pruning to the 13 months in range, one PK index scan per partition |
+| `rank_daily` rollup (ranges over 92 days) | ~0.6 ms | ~0.7 ms | One PK range scan on `rank_daily`, no sort or `DISTINCT ON` |
+
+With one capture per day the two tables are the same size; the rollup pays off when there are several captures per
+day (several locations or devices, intraday checks) and as partitions multiply, since its cost depends only on the
+days in range. Old months can be detached (`ALTER TABLE rank_snapshots DETACH PARTITION rank_snapshots_2024_01`) and
+archived without touching the rollup.

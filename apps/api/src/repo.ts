@@ -95,27 +95,40 @@ export async function getPage(userId: string, pageId: string) {
   return { ...page, keywords, issues };
 }
 
+/** Ranges longer than this read the daily rollup instead of raw snapshots. */
+export const ROLLUP_AFTER_DAYS = 92;
+
 /**
  * Daily positions for one page between two Toronto calendar dates (inclusive).
- * Bounds are converted from Toronto midnight to UTC in SQL, so DST changes are handled by Postgres.
- * Rows are grouped by Toronto date; if a keyword had several snapshots that day, the latest wins.
+ * Short ranges read raw snapshots: bounds are converted from Toronto midnight to UTC in SQL (so DST
+ * is handled by Postgres), rows are grouped by Toronto date, and the day's latest snapshot wins.
+ * Long ranges read rank_daily, which holds exactly that per day already, so the cost doesn't
+ * depend on how many raw captures each day has. Both return the same points.
  */
 export async function getHistory(userId: string, pageId: string, from: string, to: string) {
   const { rows: owned } = await pool.query(
     'SELECT 1 FROM pages p JOIN clients c ON c.id = p.client_id WHERE p.id = $1 AND c.user_id = $2', [pageId, userId]);
   if (!owned.length) return null;
+  const days = (Date.parse(to) - Date.parse(from)) / 86_400_000 + 1;
+  const source = days > ROLLUP_AFTER_DAYS ? 'rollup' : 'raw';
   const { rows } = await pool.query<{ keyword_id: number; date: string; position: number }>(
-    `SELECT DISTINCT ON (pk.id, day) pk.id AS keyword_id, to_char(day, 'YYYY-MM-DD') AS date, s.position
-     FROM page_keywords pk
-     JOIN rank_snapshots s ON s.page_keyword_id = pk.id
-     CROSS JOIN LATERAL (SELECT (s.captured_at AT TIME ZONE '${TIMEZONE}')::date AS day) d
-     WHERE pk.page_id = $1
-       AND s.captured_at >= ($2::date)::timestamp AT TIME ZONE '${TIMEZONE}'
-       AND s.captured_at <  ($3::date + 1)::timestamp AT TIME ZONE '${TIMEZONE}'
-     ORDER BY pk.id, day, s.captured_at DESC`,
+    source === 'rollup'
+      ? `SELECT pk.id AS keyword_id, to_char(d.day, 'YYYY-MM-DD') AS date, d.position
+         FROM page_keywords pk
+         JOIN rank_daily d ON d.page_keyword_id = pk.id
+         WHERE pk.page_id = $1 AND d.day BETWEEN $2::date AND $3::date
+         ORDER BY pk.id, d.day`
+      : `SELECT DISTINCT ON (pk.id, day) pk.id AS keyword_id, to_char(day, 'YYYY-MM-DD') AS date, s.position
+         FROM page_keywords pk
+         JOIN rank_snapshots s ON s.page_keyword_id = pk.id
+         CROSS JOIN LATERAL (SELECT (s.captured_at AT TIME ZONE '${TIMEZONE}')::date AS day) d
+         WHERE pk.page_id = $1
+           AND s.captured_at >= ($2::date)::timestamp AT TIME ZONE '${TIMEZONE}'
+           AND s.captured_at <  ($3::date + 1)::timestamp AT TIME ZONE '${TIMEZONE}'
+         ORDER BY pk.id, day, s.captured_at DESC`,
     [pageId, from, to],
   );
-  return { from, to, timezone: TIMEZONE, points: rows.map((r) => ({ keywordId: r.keyword_id, date: r.date, position: r.position })) };
+  return { from, to, timezone: TIMEZONE, source, points: rows.map((r) => ({ keywordId: r.keyword_id, date: r.date, position: r.position })) };
 }
 
 /** Returns null when the user already has a client for this host (unique constraint). */

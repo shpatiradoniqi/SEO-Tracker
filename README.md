@@ -41,6 +41,7 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 - Keywords are a shared vocabulary; `page_keywords` links them to pages with a score.
 - The latest position is denormalized onto `page_keywords` by the seed, so the pages list never reads the snapshots table. Its cost depends on pages per user, not on history size.
 - Search uses `pg_trgm` indexes.
+- `rank_snapshots` is partitioned by month on `captured_at` (`db/migrations/004_partition_snapshots.sql`), so old months can be detached or archived cheaply. Writers create the partitions they need first. A `rank_daily` rollup (one row per keyword per Toronto day: last, best and worst position) serves history ranges over 92 days, so long charts don't read or de-duplicate raw captures. Shorter ranges read raw snapshots, and both paths return the same points (tested).
 - Measured: every endpoint answers in 3–15 ms with the seed loaded (`docs/perf.md`).
 
 **Seed:** deterministic random walks (same history on every run). Rows are bulk-inserted with `unnest()`; 60k+ rows take under a second. The history length grows automatically if a smaller site would fall under 50,000 rows. Re-running rebuilds the two demo users and regenerates snapshots for every page in the database, which is how clients added in the app get positions "when the seed runs again".
@@ -64,7 +65,6 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 ## Unfinished / next steps
 
 - **Real rank data:** positions are simulated. A SERP API would provide real ones.
-- **Scale:** at tens of millions of snapshots, partition `rank_snapshots` by month and add a daily rollup for long ranges.
 - **Tests:** no end-to-end browser tests yet. Screens were checked manually with headless-browser screenshots.
 
 ## AI tools used

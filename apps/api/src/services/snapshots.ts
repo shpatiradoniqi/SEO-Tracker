@@ -1,4 +1,5 @@
 import type { PoolClient } from 'pg';
+import { TIMEZONE } from '../repo.js';
 
 /** Deterministic PRNG so a re-seed produces the same history for the same page_keyword id. */
 function mulberry32(seed: number): () => number {
@@ -37,11 +38,12 @@ const BATCH = 20_000;
 /**
  * Rebuilds rank_snapshots for every page_keyword in the database (seeded and app-added clients alike),
  * one row per day ending today. History length is at least `minDays`, and longer if needed to reach 50k rows.
- * Bulk-inserted with unnest() in batches, then latest_position is denormalized onto page_keywords.
+ * Bulk-inserted with unnest() in batches, then latest_position is denormalized onto page_keywords
+ * and the daily rollup is rebuilt.
  */
 export async function regenerateSnapshots(db: PoolClient, minDays = 365): Promise<{ rows: number; days: number }> {
   const { rows: pks } = await db.query<{ id: number }>('SELECT id FROM page_keywords ORDER BY id');
-  await db.query('TRUNCATE rank_snapshots');
+  await db.query('TRUNCATE rank_snapshots, rank_daily');
   if (pks.length === 0) return { rows: 0, days: 0 };
 
   const days = Math.max(minDays, Math.ceil(MIN_ROWS / pks.length));
@@ -49,6 +51,9 @@ export async function regenerateSnapshots(db: PoolClient, minDays = 365): Promis
   const now = new Date();
   let lastDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), SNAPSHOT_HOUR_UTC);
   if (lastDay > now.getTime()) lastDay -= DAY; // never write a snapshot in the future
+  const firstDay = lastDay - (days - 1) * DAY;
+  // Monthly partitions must exist before rows arrive (rank_snapshots is partitioned by captured_at).
+  await db.query('SELECT ensure_rank_snapshot_partitions($1, $2)', [new Date(firstDay), new Date(lastDay)]);
 
   let ids: number[] = [], times: string[] = [], positions: number[] = [];
   let total = 0;
@@ -82,6 +87,9 @@ export async function regenerateSnapshots(db: PoolClient, minDays = 365): Promis
       FROM rank_snapshots ORDER BY page_keyword_id, captured_at DESC
     ) s
     WHERE pk.id = s.page_keyword_id`);
-  await db.query('ANALYZE rank_snapshots');
+  await db.query(
+    `SELECT refresh_rank_daily(($1::timestamptz AT TIME ZONE '${TIMEZONE}')::date, ($2::timestamptz AT TIME ZONE '${TIMEZONE}')::date)`,
+    [new Date(firstDay), new Date(lastDay)]);
+  await db.query('ANALYZE rank_snapshots, rank_daily');
   return { rows: total, days };
 }

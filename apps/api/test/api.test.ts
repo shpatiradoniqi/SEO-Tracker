@@ -27,7 +27,9 @@ async function makeUser(email: string, password: string, host: string) {
   const { rows: [pk] } = await pool.query(
     'INSERT INTO page_keywords(page_id, keyword_id, score, rank_order) VALUES ($1, $2, 1, 1) RETURNING id', [p.id, k.id]);
   // 03:30 UTC on Jan 15 is 22:30 on Jan 14 in Toronto: the history must report it as Jan 14.
-  await pool.query(`INSERT INTO rank_snapshots VALUES ($1, '2026-01-15T03:30:00Z', 7), ($1, '2026-07-15T03:30:00Z', 9)`, [pk.id]);
+  // A second capture the same Toronto day (Jan 14, earlier) must lose to the later one.
+  await pool.query(`INSERT INTO rank_snapshots VALUES ($1, '2026-01-14T15:00:00Z', 30), ($1, '2026-01-15T03:30:00Z', 7), ($1, '2026-07-15T03:30:00Z', 9)`, [pk.id]);
+  await pool.query(`SELECT refresh_rank_daily('2026-01-01', '2026-12-31', ARRAY[$1::int])`, [pk.id]);
   const { rows: [j] } = await pool.query('INSERT INTO crawl_jobs(client_id, status) VALUES ($1, $2) RETURNING id', [c.id, 'done']);
   return { client: c.id as string, page: p.id as string, job: j.id as string };
 }
@@ -147,6 +149,20 @@ describe('pages and history', () => {
     expect(res.points).toEqual([expect.objectContaining({ date: '2026-01-14', position: 7 })]);
     const empty = (await asA('GET', `/api/pages/${ids.aPage}/history?from=2026-01-15&to=2026-01-15`)).json();
     expect(empty.points).toEqual([]);
+  });
+  it('serves long ranges from the daily rollup with the same Toronto-day points', async () => {
+    const res = (await asA('GET', `/api/pages/${ids.aPage}/history?from=2026-01-01&to=2026-12-31`)).json();
+    expect(res.source).toBe('rollup');
+    expect(res.points.map((p: { date: string; position: number }) => [p.date, p.position])).toEqual([['2026-01-14', 7], ['2026-07-14', 9]]);
+    const short = (await asA('GET', `/api/pages/${ids.aPage}/history?from=2026-01-01&to=2026-01-31`)).json();
+    expect(short.source).toBe('raw');
+    expect(short.points.map((p: { date: string; position: number }) => [p.date, p.position])).toEqual([['2026-01-14', 7]]);
+  });
+  it('stores snapshots in monthly partitions', async () => {
+    const { rows } = await pool.query(
+      `SELECT s.tableoid::regclass::text AS part FROM rank_snapshots s JOIN page_keywords pk ON pk.id = s.page_keyword_id
+       WHERE pk.page_id = $1 ORDER BY captured_at`, [ids.aPage]);
+    expect(rows.map((r) => r.part)).toEqual(['rank_snapshots_2026_01', 'rank_snapshots_2026_01', 'rank_snapshots_2026_07']);
   });
   it('rejects an inverted date range', async () => {
     expect((await asA('GET', `/api/pages/${ids.aPage}/history?from=2026-02-01&to=2026-01-01`)).statusCode).toBe(400);
