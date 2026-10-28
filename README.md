@@ -32,6 +32,8 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 
 **Keywords: weighted fields, site-level IDF, strict phrase rules.** Candidates are 1–3-word phrases from the title, H1, URL slug, meta description, H2s and body, weighted in that order. Phrases containing stopwords are dropped ("segments in google" is a fragment, not a query). Brand and author names are excluded. Single words must be in the title, H1 and slug together. IDF across the client's 15 pages pushes down words the whole site uses. Overlapping and plural variants are de-duplicated. The top 6 per page are kept. This is a heuristic with no search-volume data, so it finds topics, not proven ranking terms.
 
+**Optional LLM re-rank.** With `KEYWORD_RERANK=claude` (and an Anthropic API key), the heuristic proposes its top 12 per page and one Claude request per crawl (`claude-opus-5-5` by default, low effort, structured JSON output validated with Zod) picks and orders the final 6. Claude can only choose from the candidates: invented or duplicate phrases are dropped and the list is topped up from the heuristic order. Any error, refusal or unparseable answer falls back to the heuristic's top 6, so crawls never fail because of it. Off by default.
+
 **SEO issues:** 15 on-page checks with a severity each (title/meta length, missing or multiple H1, skipped heading levels, missing alt text, canonical missing or pointing elsewhere, noindex, thin content, missing `lang`/Open Graph), plus duplicate titles across a client's pages. Both seed sites are SEO companies, so they have few issues.
 
 **Schema:** see `db/migrations/001_init.sql`.
@@ -61,7 +63,7 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 
 ## Unfinished / next steps
 
-- **Keyword quality:** an LLM pass that re-ranks the heuristic candidates, with JSON output and the heuristic as fallback, would improve results. Real rank data would come from a SERP API.
+- **Real rank data:** positions are simulated. A SERP API would provide real ones.
 - **Scale:** at tens of millions of snapshots, partition `rank_snapshots` by month and add a daily rollup for long ranges.
 - **Tests:** no end-to-end browser tests yet. Screens were checked manually with headless-browser screenshots.
 

@@ -5,6 +5,7 @@ import { extractKeywords, brandTokens, type KeywordCandidate } from './keywords.
 import { detectIssues, detectDuplicateTitles, type SeoIssue } from './issues.js';
 import { parseRobots, ALLOW_ALL, DISALLOW_ALL, type Robots } from './robots.js';
 import { HostThrottle } from './throttle.js';
+import { rerankKeywords, type KeywordReranker } from './rerank.js';
 
 export interface CrawledPage {
   position: number; // 1-based order among kept posts, following the sitemap
@@ -23,7 +24,13 @@ export interface CrawlOptions {
   fetch?: (url: string, opts?: FetchOptions) => Promise<FetchResult>; // raw fetcher, for tests
   /** Upper bound on a site's robots.txt Crawl-delay, for operators who need faster crawls. Default: honour it (max 60 s). */
   maxCrawlDelaySeconds?: number;
+  /** Optional LLM pass that picks the final keywords from a longer heuristic candidate list. */
+  reranker?: KeywordReranker;
+  onRerankError?: (err: unknown) => void;
 }
+
+const KEYWORDS_PER_PAGE = 6;
+const CANDIDATES_FOR_RERANK = 12;
 
 export class NoPostsFoundError extends Error {}
 /** The site's robots.txt doesn't let us crawl what we need (or couldn't be read). */
@@ -78,7 +85,7 @@ export function politeFetcher(raw: Fetcher = safeFetch, throttle = new HostThrot
  * then extract keywords (with site-level IDF) and SEO issues.
  */
 export async function crawlSite(websiteUrl: string, opts: CrawlOptions = {}): Promise<{ discovery: Discovery; pages: CrawledPage[] }> {
-  const { limit = 15, maxFetches = 40, concurrency = 3, onProgress, fetch: raw = safeFetch, maxCrawlDelaySeconds } = opts;
+  const { limit = 15, maxFetches = 40, concurrency = 3, onProgress, fetch: raw = safeFetch, maxCrawlDelaySeconds, reranker, onRerankError } = opts;
   await onProgress?.({ phase: 'discovering', found: 0, done: 0 });
   const polite = politeFetcher(raw, new HostThrottle(), { maxCrawlDelaySeconds });
   const robots = await polite.robotsFor(websiteUrl);
@@ -126,7 +133,11 @@ export async function crawlSite(websiteUrl: string, opts: CrawlOptions = {}): Pr
     throw new NoPostsFoundError(`Found sitemap ${discovery.sitemapUrl}, but none of the first ${candidates.length} URLs looked like blog posts.`);
   }
 
-  const keywords = extractKeywords(posts, brandTokens(websiteUrl, posts));
+  const brand = brandTokens(websiteUrl, posts);
+  const keywords = reranker
+    ? await rerankKeywords(websiteUrl, posts, extractKeywords(posts, brand, CANDIDATES_FOR_RERANK), reranker,
+      { perPage: KEYWORDS_PER_PAGE, onError: onRerankError })
+    : extractKeywords(posts, brand, KEYWORDS_PER_PAGE);
   const duplicates = detectDuplicateTitles(posts);
   const pages = posts.map((page, i) => ({
     position: i + 1,
