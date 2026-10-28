@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "e2e"
   ],
   "scripts": {
     "db:migrate": "npm run migrate -w @seo/api",
@@ -13,6 +14,7 @@
     "worker": "npm run worker -w @seo/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w @seo/e2e",
     "build": "npm run build -w @seo/web"
   },
   "engines": {

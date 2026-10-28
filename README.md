@@ -23,6 +23,7 @@ If port 5432 is already in use (for example by a local PostgreSQL install), set 
 
 Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password `password123`.
 `npm test` runs the crawler unit tests and the API integration tests (the API tests need the database running).
+`npm run test:e2e` runs Playwright browser tests against the real app and the seeded database: sign-in and sign-out, the pages list (tenancy, search kept in the URL), the detail chart and table, another user's page, adding a private address (a CSRF-protected POST), and a phone-sized layout check. It starts `npm run dev` itself, or reuses running dev servers. First time only: `npx playwright install chromium`.
 
 ## Decisions and why
 
@@ -67,7 +68,7 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 ## Unfinished / next steps
 
 - **Real rank data:** `ranks:refresh` exists but isn't scheduled; it would run as a daily cron/worker job, and the seed would keep real snapshots instead of replacing them.
-- **Tests:** no end-to-end browser tests yet. Screens were checked manually with headless-browser screenshots.
+- **Tests:** the e2e suite reads the seeded data rather than creating its own; it would get an isolated database and run in CI. No live crawl or LLM/SERP calls are exercised end to end (they're unit-tested with fakes).
 
 ## AI tools used
 
