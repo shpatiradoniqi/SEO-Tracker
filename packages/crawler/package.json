@@ -17,6 +17,7 @@
   "dependencies": {
     "cheerio": "1.2.0",
     "fast-xml-parser": "5.11.2",
-    "p-limit": "7.3.3"
+    "p-limit": "7.3.3",
+    "undici": "7.30.1"
   }
 }

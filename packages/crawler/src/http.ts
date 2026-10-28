@@ -1,6 +1,8 @@
+import dns from 'node:dns';
 import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
 import { gunzipSync } from 'node:zlib';
+import { Agent, fetch as undiciFetch, type Response } from 'undici';
 
 export const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 SeoTracker/1.0';
@@ -44,6 +46,38 @@ export async function assertPublicHost(url: URL): Promise<void> {
   }
 }
 
+type Resolver = (hostname: string, options: dns.LookupAllOptions,
+  callback: (err: NodeJS.ErrnoException | null, addresses: dns.LookupAddress[]) => void) => void;
+
+/**
+ * DNS lookup for the socket itself: resolves, rejects private/reserved answers, and hands the vetted
+ * addresses straight to connect(). assertPublicHost() alone checks one lookup and then lets fetch do
+ * another, so a DNS-rebinding server could answer "public" first and "127.0.0.1" second. Here the
+ * address that gets checked is the address that gets connected to.
+ */
+export function createGuardedLookup(resolve: Resolver = dns.lookup): LookupFunction {
+  return ((hostname: string, options: dns.LookupOptions, callback: (...args: unknown[]) => void) => {
+    resolve(hostname, { family: options.family, hints: options.hints, all: true, verbatim: true }, (err, addresses) => {
+      if (err) return callback(err);
+      if (addresses.length === 0 || addresses.some((a) => isPrivateAddress(a.address))) {
+        return callback(new BlockedHostError(`Blocked host ${hostname} (resolves to a private or reserved address)`));
+      }
+      if (options.all) return callback(null, addresses);
+      callback(null, addresses[0]!.address, addresses[0]!.family);
+    });
+  }) as LookupFunction;
+}
+
+/** HTTP agent whose every connection goes through the guarded lookup (IP literals are checked by assertPublicHost). */
+export const createGuardedAgent = (resolve?: Resolver) => new Agent({ connect: { lookup: createGuardedLookup(resolve) } });
+const guardedAgent = createGuardedAgent();
+
+/** undici wraps connection errors as TypeError('fetch failed', { cause }); surface our block reason. */
+function blockedCause(err: unknown): BlockedHostError | null {
+  for (let e = err; e instanceof Error; e = e.cause) if (e instanceof BlockedHostError) return e;
+  return null;
+}
+
 export interface FetchResult {
   url: string; // final URL after redirects
   status: number;
@@ -79,8 +113,9 @@ async function readCapped(res: Response, maxBytes: number): Promise<Buffer> {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * GET with an SSRF guard on every redirect hop, a timeout, a body size cap,
- * transparent .gz handling, and retries with backoff on network errors / 429 / 5xx.
+ * GET with an SSRF guard on every redirect hop (checked up front and again on the socket's own DNS
+ * lookup), a timeout, a body size cap, transparent .gz handling, and retries with backoff on
+ * network errors / 429 / 5xx.
  */
 export async function safeFetch(rawUrl: string, opts: FetchOptions = {}): Promise<FetchResult> {
   const { timeoutMs = 15_000, retries = 2, maxBytes = 15 * 1024 * 1024, accept = '*/*' } = opts;
@@ -91,7 +126,8 @@ export async function safeFetch(rawUrl: string, opts: FetchOptions = {}): Promis
       let url = new URL(rawUrl);
       for (let hop = 0; hop <= 5; hop++) {
         await assertPublicHost(url);
-        const res = await fetch(url, {
+        const res = await undiciFetch(url, {
+          dispatcher: guardedAgent,
           redirect: 'manual',
           signal: AbortSignal.timeout(timeoutMs),
           headers: { 'user-agent': USER_AGENT, accept, 'accept-language': 'en-US,en;q=0.9' },
@@ -116,7 +152,8 @@ export async function safeFetch(rawUrl: string, opts: FetchOptions = {}): Promis
       }
       throw new Error(`Too many redirects for ${rawUrl}`);
     } catch (err) {
-      if (err instanceof BlockedHostError) throw err; // never retry a blocked host
+      const blocked = blockedCause(err);
+      if (blocked) throw blocked; // never retry a blocked host
       lastError = err;
     }
   }
