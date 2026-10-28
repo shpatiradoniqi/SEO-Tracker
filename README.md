@@ -15,6 +15,8 @@ npm run seed                    # live-crawls semrush.com and yoast.com, ~1 min;
 npm run dev                     # API on :3001, app on http://localhost:5173
 ```
 
+If port 5432 is already in use (for example by a local PostgreSQL install), set `DB_PORT=5433` in `.env`, use the same port in `DATABASE_URL`, and run `docker compose up -d --wait` again.
+
 Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password `password123`.
 `npm test` runs the crawler unit tests and the API integration tests (the API tests need the database running).
 
