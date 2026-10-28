@@ -44,6 +44,8 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 **Tenancy:** every data query lives in `apps/api/src/repo.ts` and filters on `clients.user_id`. An id belonging to someone else matches no rows and returns 404, the same as a missing id, so the API doesn't reveal that it exists. Integration tests try User B's page, history, job and client ids as User A, through every route.
 
 **Auth:** an httpOnly cookie holding a random token. The database stores only its SHA-256 hash, so a database leak can't hijack sessions. Passwords use scrypt from `node:crypto`, chosen over argon2 so there is no native build step on Windows. Login time doesn't reveal whether an email exists.
+- **Rate limiting:** failed sign-ins are counted in Postgres (shared by every API process) per email (5 per 15 minutes) and per IP (50 per 15 minutes). A locked-out request gets `429` with `Retry-After`, and the lock is checked before the password, so it reveals nothing. A successful sign-in clears the account's counter. Behind a reverse proxy, set `TRUST_PROXY=true` so the real client IP is used.
+- **CSRF:** every state-changing request with a session cookie must send `X-CSRF-Token`, an HMAC of the session token keyed by `SESSION_SECRET`. The app gets it from the login and `/auth/me` responses and keeps it in memory. Another site can make the browser send the cookie but can't read the token. Login itself is exempt (no session yet, JSON-only body).
 
 **Adding a client:** the URL is validated and normalized, so `www.Yoast.com/` and `yoast.com` are the same site. A unique `(user_id, host)` constraint blocks duplicates. The API returns `202` and queues a job in `crawl_jobs`. A separate worker service (`apps/api/src/worker-main.ts`) claims jobs with `FOR UPDATE SKIP LOCKED` (a Postgres queue, so no Redis) and records progress, which the UI polls. Any number of workers can run. Each running job records its owner and a heartbeat every 10 s; if a worker dies, another one re-queues its jobs after 60 s (up to 3 attempts), and a worker that lost a job can't overwrite the new result. On shutdown a worker finishes or hands back its running jobs. Failures are stored as readable messages, and the client can be retried or removed. Because the server fetches URLs that users type in, every request and redirect hop is checked against private, loopback and metadata IP ranges (SSRF guard).
 
@@ -55,7 +57,6 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 
 ## Unfinished / next steps
 
-- **Missing protections:** no login rate limiting and no CSRF token. SameSite=Lax cookies and JSON-only endpoints cover the common cases, but I'd add both.
 - **SSRF guard:** checks DNS before connecting, which leaves a small DNS-rebinding window. Pinning the resolved IP in a custom HTTP agent would close it.
 - **Crawling politeness:** the crawler doesn't read `robots.txt` crawl rules or per-host rate limits beyond a concurrency of 3.
 - **Keyword quality:** an LLM pass that re-ranks the heuristic candidates, with JSON output and the heuristic as fallback, would improve results. Real rank data would come from a SERP API.

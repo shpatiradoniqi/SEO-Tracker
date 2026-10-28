@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { api, setCsrfToken } from '../lib/api';
 import { useMe } from '../lib/auth';
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -12,6 +12,7 @@ export function Layout() {
   const navigate = useNavigate();
   const signOut = async () => {
     await api.post('/auth/logout');
+    setCsrfToken(null);
     qc.clear();
     navigate('/login', { replace: true });
   };

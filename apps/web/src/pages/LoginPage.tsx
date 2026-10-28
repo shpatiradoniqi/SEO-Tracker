@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { api, type User } from '../lib/api';
+import { api, setCsrfToken, type User } from '../lib/api';
 import { useMe } from '../lib/auth';
 
 export function LoginPage() {
@@ -22,6 +22,7 @@ export function LoginPage() {
     setError(null);
     try {
       const user = await api.post<User>('/auth/login', { email, password });
+      setCsrfToken(user.csrfToken);
       qc.setQueryData(['me'], user);
       navigate(from, { replace: true });
     } catch (err) {

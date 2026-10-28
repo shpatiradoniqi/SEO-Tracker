@@ -2,11 +2,19 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
+// CSRF token for the current session, from the login and /auth/me responses. Kept in memory only:
+// a refresh re-reads it from /auth/me, which every signed-in screen calls first.
+let csrfToken: string | null = null;
+export const setCsrfToken = (token: string | null) => { csrfToken = token; };
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body) headers['content-type'] = 'application/json';
+  if (method !== 'GET' && csrfToken) headers['x-csrf-token'] = csrfToken;
   const res = await fetch(`/api${url}`, {
     method,
     credentials: 'same-origin',
-    headers: body ? { 'content-type': 'application/json' } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 204) return undefined as T;
@@ -21,7 +29,7 @@ export const api = {
   delete: <T>(url: string) => request<T>('DELETE', url),
 };
 
-export interface User { id: string; email: string }
+export interface User { id: string; email: string; csrfToken: string }
 export interface Client {
   id: string; name: string; websiteUrl: string; pageCount: number;
   jobId: string | null; jobStatus: JobStatus | null; jobError: string | null;

@@ -11,6 +11,7 @@ const A = { email: `a-${tag}@test.dev`, password: 'pw-a' };
 const B = { email: `b-${tag}@test.dev`, password: 'pw-b' };
 let app: FastifyInstance;
 let cookieA = '';
+let csrfA = '';
 const ids = { bClient: '', bPage: '', bJob: '', aPage: '' };
 
 async function makeUser(email: string, password: string, host: string) {
@@ -39,27 +40,68 @@ beforeAll(async () => {
   Object.assign(ids, { aPage: a.page, bClient: b.client, bPage: b.page, bJob: b.job });
   const res = await app.inject({ method: 'POST', url: '/api/auth/login', payload: A });
   cookieA = String(res.headers['set-cookie']).split(';')[0]!;
+  csrfA = res.json().csrfToken;
 });
 
 afterAll(async () => {
   await pool.query('DELETE FROM users WHERE email IN ($1, $2)', [A.email, B.email]);
+  await pool.query(`DELETE FROM login_attempts WHERE key LIKE $1 OR key = 'ip:127.0.0.1'`, [`email:%${tag}%`]);
   await pool.query(`DELETE FROM keywords WHERE term LIKE $1`, [`%${tag}`]);
   await app.close();
   await pool.end();
 });
 
-const asA = (method: 'GET' | 'POST', url: string, payload?: object) =>
-  app.inject({ method, url, payload, headers: { cookie: cookieA } });
+const asA = (method: 'GET' | 'POST' | 'DELETE', url: string, payload?: object) =>
+  app.inject({ method, url, payload, headers: { cookie: cookieA, 'x-csrf-token': csrfA } });
+const login = (email: string, password: string) => app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password } });
 
 describe('auth', () => {
   it('rejects a wrong password and unauthenticated requests', async () => {
-    expect((await app.inject({ method: 'POST', url: '/api/auth/login', payload: { ...A, password: 'nope' } })).statusCode).toBe(401);
+    expect((await login(A.email, 'nope')).statusCode).toBe(401);
     expect((await app.inject({ method: 'GET', url: '/api/pages' })).statusCode).toBe(401);
   });
   it('restores the session from the cookie', async () => {
     const me = await asA('GET', '/api/auth/me');
     expect(me.statusCode).toBe(200);
     expect(me.json().email).toBe(A.email);
+    expect(me.json().csrfToken).toBe(csrfA);
+  });
+});
+
+describe('CSRF', () => {
+  const addClient = (headers: Record<string, string>) =>
+    app.inject({ method: 'POST', url: '/api/clients', payload: { name: 'X', websiteUrl: 'not a url' }, headers });
+  it('rejects state-changing requests without the session\'s token', async () => {
+    expect((await addClient({ cookie: cookieA })).statusCode).toBe(403);
+    expect((await addClient({ cookie: cookieA, 'x-csrf-token': 'forged' })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url: `/api/clients/${ids.bClient}`, headers: { cookie: cookieA } })).statusCode).toBe(403);
+  });
+  it('does not accept another session\'s token', async () => {
+    const other = await login(A.email, A.password);
+    expect((await addClient({ cookie: cookieA, 'x-csrf-token': other.json().csrfToken })).statusCode).toBe(403);
+  });
+  it('lets reads through without a token and accepts the right one', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/clients', headers: { cookie: cookieA } })).statusCode).toBe(200);
+    expect((await addClient({ cookie: cookieA, 'x-csrf-token': csrfA })).statusCode).toBe(400); // passed CSRF, failed validation
+  });
+});
+
+describe('login rate limiting', () => {
+  it('locks an email after 5 failures, even for the right password, and says when to retry', async () => {
+    const email = `locked-${tag}@test.dev`;
+    await pool.query('INSERT INTO users(email, password_hash) VALUES ($1, $2)', [email, await hashPassword('right')]);
+    for (let i = 0; i < 5; i++) expect((await login(email, 'wrong')).statusCode).toBe(401);
+    const locked = await login(email, 'right');
+    expect(locked.statusCode).toBe(429);
+    expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0);
+    expect(locked.json().error).toMatch(/Try again in 15 minutes/);
+    await pool.query('DELETE FROM users WHERE email = $1', [email]);
+  });
+  it('a successful sign-in resets the account\'s counter', async () => {
+    for (let i = 0; i < 4; i++) await login(B.email, 'wrong');
+    expect((await login(B.email, B.password)).statusCode).toBe(200);
+    for (let i = 0; i < 4; i++) expect((await login(B.email, 'wrong')).statusCode).toBe(401);
+    expect((await login(B.email, B.password)).statusCode).toBe(200);
   });
 });
 
@@ -82,7 +124,7 @@ describe('tenancy: user A cannot reach user B data by any route', () => {
   });
   it('cannot recrawl or delete B\'s client', async () => {
     expect((await asA('POST', `/api/clients/${ids.bClient}/crawl`)).statusCode).toBe(404);
-    expect((await app.inject({ method: 'DELETE', url: `/api/clients/${ids.bClient}`, headers: { cookie: cookieA } })).statusCode).toBe(404);
+    expect((await asA('DELETE', `/api/clients/${ids.bClient}`)).statusCode).toBe(404);
     const { rows } = await pool.query('SELECT 1 FROM clients WHERE id = $1', [ids.bClient]);
     expect(rows).toHaveLength(1);
   });
@@ -124,7 +166,7 @@ describe('add client', () => {
     expect(job.json().status).toBe('queued');
     // A second crawl cannot be queued while one is pending; deleting frees the host for re-adding.
     expect((await asA('POST', `/api/clients/${first.json().clientId}/crawl`)).statusCode).toBe(409);
-    const del = await app.inject({ method: 'DELETE', url: `/api/clients/${first.json().clientId}`, headers: { cookie: cookieA } });
+    const del = await asA('DELETE', `/api/clients/${first.json().clientId}`);
     expect(del.statusCode).toBe(204);
   });
 });
