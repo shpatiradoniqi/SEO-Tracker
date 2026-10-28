@@ -46,6 +46,8 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 
 **Seed:** deterministic random walks (same history on every run). Rows are bulk-inserted with `unnest()`; 60k+ rows take under a second. The history length grows automatically if a smaller site would fall under 50,000 rows. Re-running rebuilds the two demo users and regenerates snapshots for every page in the database, which is how clients added in the app get positions "when the seed runs again".
 
+**Real rank data (optional).** `npm run ranks:refresh` captures current Google positions from SerpApi (`SERPAPI_KEY` in `.env`): one search per distinct keyword (100 results), matched to each page by URL (ignoring scheme, `www.`, trailing slash and query). Matches get a snapshot and become the latest position; pages outside the top 100 have their latest position cleared. All searches run before a single short write transaction, which also refreshes the daily rollup. Use `--dry-run` to count searches first, `--limit N` or `--client <id>` to spend less. Run it daily (cron) to build real history. `npm run seed` regenerates simulated history and replaces real snapshots, so don't re-seed a database you're collecting real data in.
+
 **Time zones:** snapshots are stored as `timestamptz` in UTC at 06:00, which is the same calendar day in Toronto all year. The history API takes Toronto dates, converts the range bounds in SQL (`::timestamp AT TIME ZONE 'America/Toronto'`, so DST is handled by Postgres), and groups by Toronto date. A test checks that 03:30 UTC on Jan 15 is reported as Jan 14.
 
 **Tenancy:** every data query lives in `apps/api/src/repo.ts` and filters on `clients.user_id`. An id belonging to someone else matches no rows and returns 404, the same as a missing id, so the API doesn't reveal that it exists. Integration tests try User B's page, history, job and client ids as User A, through every route.
@@ -64,7 +66,7 @@ Sign in as `alice@example.com` (Semrush) or `bob@example.com` (Yoast), password 
 
 ## Unfinished / next steps
 
-- **Real rank data:** positions are simulated. A SERP API would provide real ones.
+- **Real rank data:** `ranks:refresh` exists but isn't scheduled; it would run as a daily cron/worker job, and the seed would keep real snapshots instead of replacing them.
 - **Tests:** no end-to-end browser tests yet. Screens were checked manually with headless-browser screenshots.
 
 ## AI tools used
