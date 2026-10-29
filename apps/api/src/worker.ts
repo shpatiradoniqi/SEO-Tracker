@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
-import { crawlSite, SitemapNotFoundError, NoPostsFoundError, BlockedHostError, RobotsDisallowedError } from '@seo/crawler';
+import { crawlSite, SitemapNotFoundError, NoPostsFoundError, BlockedHostError, RobotsDisallowedError, SiteBlockedError } from '@seo/crawler';
 import { pool, tx } from './db/pool.js';
 import { replaceClientPages } from './services/persist.js';
 import { crawlOptionsFromEnv } from './services/crawl-options.js';
@@ -59,6 +59,7 @@ function friendlyError(err: unknown): string {
   if (err instanceof SitemapNotFoundError) return err.message;
   if (err instanceof NoPostsFoundError) return err.message;
   if (err instanceof RobotsDisallowedError) return err.message;
+  if (err instanceof SiteBlockedError) return err.message;
   if (err instanceof BlockedHostError) return 'That address points to a private or reserved network and cannot be crawled.';
   return `Crawl failed: ${err instanceof Error ? err.message : String(err)}`;
 }

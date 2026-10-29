@@ -92,4 +92,15 @@ describe('discoverBlogSitemap', () => {
   it('throws a SitemapNotFoundError listing what it tried', async () => {
     await expect(discoverBlogSitemap('https://none.dev')).rejects.toThrow(/No usable sitemap found. Tried: https:\/\/none.dev\/sitemap.xml/);
   });
+
+  it('records locations the server refused, separately from missing ones', async () => {
+    const fetch = async (url: string) => ({ url, status: url.endsWith('/sitemap.xml') ? 403 : 404, contentType: 'text/html', body: '' });
+    const err = await discoverBlogSitemap('https://cf.dev', { fetch }).catch((e) => e);
+    expect(err.refused).toEqual([
+      { url: 'https://cf.dev/sitemap.xml', status: 403 },
+      { url: 'https://cf.dev/blog/sitemap.xml', status: 403 },
+      { url: 'https://cf.dev/articles/sitemap.xml', status: 403 },
+      { url: 'https://cf.dev/news/sitemap.xml', status: 403 },
+    ]);
+  });
 });

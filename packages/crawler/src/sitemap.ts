@@ -13,8 +13,15 @@ export interface DiscoveryOptions {
   robots?: Robots;
 }
 
+/** Statuses that mean "you may not have this" (bot protection, auth, rate limiting), not "it doesn't exist". */
+export const REFUSED_STATUSES = new Set([401, 403, 429]);
+
 export class SitemapNotFoundError extends Error {
-  constructor(public readonly tried: string[]) {
+  constructor(
+    public readonly tried: string[],
+    /** Locations the server refused (e.g. a Cloudflare 403) instead of answering 404. */
+    public readonly refused: { url: string; status: number }[] = [],
+  ) {
     super(
       tried.length
         ? `No usable sitemap found. Tried: ${tried.join(', ')}`
@@ -109,6 +116,7 @@ export async function discoverBlogSitemap(websiteUrl: string, opts: DiscoveryOpt
   const { maxDepth = 3, fetch: fetchUrl = safeFetch, robots: knownRobots } = opts;
   const base = new URL(websiteUrl);
   const tried: string[] = [];
+  const refused: { url: string; status: number }[] = [];
   const fetched = new Map<string, ParsedSitemap>();
 
   async function load(url: string): Promise<ParsedSitemap | null> {
@@ -116,6 +124,7 @@ export async function discoverBlogSitemap(websiteUrl: string, opts: DiscoveryOpt
     tried.push(url);
     try {
       const res = await fetchUrl(url, { accept: 'application/xml,text/xml;q=0.9,*/*;q=0.8', retries: 1 });
+      if (REFUSED_STATUSES.has(res.status)) refused.push({ url, status: res.status });
       if (res.status !== 200) return null;
       const parsed = parseSitemap(res.body);
       if (parsed) fetched.set(url, parsed);
@@ -217,7 +226,7 @@ export async function discoverBlogSitemap(websiteUrl: string, opts: DiscoveryOpt
     firstLeaf ??= leaf.url;
     all.push(...leaf.urls);
   }
-  if (!firstLeaf) throw new SitemapNotFoundError(tried);
+  if (!firstLeaf) throw new SitemapNotFoundError(tried, refused);
   const unique = [...new Set(all)];
   const blogPaths = unique.filter((u) => BLOG_PATH.test(new URL(u).pathname));
   if (blogPaths.length) return { sitemapUrl: firstLeaf, strategy: 'blog-path-filter', urls: blogPaths, tried };

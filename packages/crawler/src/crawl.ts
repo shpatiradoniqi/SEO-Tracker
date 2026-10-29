@@ -1,6 +1,6 @@
 import { safeFetch, BlockedHostError, type FetchOptions, type FetchResult } from './http.js';
 import { parsePage, looksLikePost, type ParsedPage } from './parse.js';
-import { discoverBlogSitemap, SitemapNotFoundError, type Discovery, type Fetcher } from './sitemap.js';
+import { discoverBlogSitemap, SitemapNotFoundError, REFUSED_STATUSES, type Discovery, type Fetcher } from './sitemap.js';
 import { extractKeywords, brandTokens, type KeywordCandidate } from './keywords.js';
 import { detectIssues, detectDuplicateTitles, type SeoIssue } from './issues.js';
 import { parseRobots, ALLOW_ALL, DISALLOW_ALL, type Robots } from './robots.js';
@@ -35,7 +35,11 @@ const CANDIDATES_FOR_RERANK = 12;
 export class NoPostsFoundError extends Error {}
 /** The site's robots.txt doesn't let us crawl what we need (or couldn't be read). */
 export class RobotsDisallowedError extends Error {}
+/** The server refused our requests (401/403/429), usually bot protection such as Cloudflare. */
+export class SiteBlockedError extends Error {}
 class DisallowedUrl extends Error {}
+
+const blockedHint = 'This is usually bot protection such as Cloudflare; the site owner would need to allow the SeoTracker crawler.';
 
 /**
  * Wraps a fetcher with crawling politeness: each host's robots.txt is read once and its rules apply
@@ -100,6 +104,10 @@ export async function crawlSite(websiteUrl: string, opts: CrawlOptions = {}): Pr
     if (err instanceof SitemapNotFoundError && polite.stats.disallowed > 0) {
       throw new RobotsDisallowedError(`The site's robots.txt doesn't allow crawling its sitemaps.`);
     }
+    if (err instanceof SitemapNotFoundError && err.refused.length > 0) {
+      const { url, status } = err.refused[0];
+      throw new SiteBlockedError(`The site refused the crawler (HTTP ${status} for ${url}). ${blockedHint}`);
+    }
     throw err;
   }
   const candidates = discovery.urls.slice(0, maxFetches);
@@ -108,12 +116,17 @@ export async function crawlSite(websiteUrl: string, opts: CrawlOptions = {}): Pr
 
   const posts: ParsedPage[] = [];
   let disallowed = 0;
+  let refused = 0;
   for (let i = 0; i < candidates.length && posts.length < limit; i += concurrency) {
     const batch = candidates.slice(i, i + concurrency);
     const results = await Promise.all(
       batch.map(async (url) => {
         try {
           const res = await polite.fetch(url, { accept: 'text/html,application/xhtml+xml', maxBytes: 5 * 1024 * 1024 });
+          if (REFUSED_STATUSES.has(res.status)) {
+            refused++;
+            return null;
+          }
           if (!/html/i.test(res.contentType)) return null;
           const parsed = parsePage(res.body, url, res.status);
           return looksLikePost(parsed) ? parsed : null;
@@ -129,6 +142,9 @@ export async function crawlSite(websiteUrl: string, opts: CrawlOptions = {}): Pr
   if (posts.length === 0) {
     if (disallowed === candidates.length) {
       throw new RobotsDisallowedError(`Found sitemap ${discovery.sitemapUrl}, but the site's robots.txt doesn't allow crawling its posts.`);
+    }
+    if (refused > 0 && refused + disallowed === candidates.length) {
+      throw new SiteBlockedError(`Found sitemap ${discovery.sitemapUrl}, but the site refused the crawler for its posts. ${blockedHint}`);
     }
     throw new NoPostsFoundError(`Found sitemap ${discovery.sitemapUrl}, but none of the first ${candidates.length} URLs looked like blog posts.`);
   }

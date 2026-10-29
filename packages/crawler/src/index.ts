@@ -1,4 +1,4 @@
-export { crawlSite, politeFetcher, NoPostsFoundError, RobotsDisallowedError, type CrawledPage, type CrawlProgress } from './crawl.js';
+export { crawlSite, politeFetcher, NoPostsFoundError, RobotsDisallowedError, SiteBlockedError, type CrawledPage, type CrawlProgress } from './crawl.js';
 export { SitemapNotFoundError, discoverBlogSitemap } from './sitemap.js';
 export { BlockedHostError, safeFetch, assertPublicHost } from './http.js';
 export { parseRobots, type Robots } from './robots.js';

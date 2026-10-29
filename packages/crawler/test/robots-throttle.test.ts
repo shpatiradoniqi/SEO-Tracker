@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { parseRobots } from '../src/robots.js';
 import { HostThrottle } from '../src/throttle.js';
-import { politeFetcher } from '../src/crawl.js';
+import { politeFetcher, crawlSite, SiteBlockedError } from '../src/crawl.js';
+import { SitemapNotFoundError } from '../src/sitemap.js';
 import type { FetchResult } from '../src/http.js';
 
 describe('robots.txt rules', () => {
@@ -124,5 +125,21 @@ describe('polite fetcher', () => {
     const polite = politeFetcher(async (url) => ok(url, robots), throttle, { maxCrawlDelaySeconds: 2 });
     await polite.robotsFor('https://www.semrush.com/');
     expect(throttle.limitsFor('www.semrush.com').minGapMs).toBe(2000);
+  });
+});
+
+describe('crawl failure reasons', () => {
+  const status = (url: string, code: number): FetchResult => ({ url, status: code, contentType: 'text/html', body: '' });
+
+  it('says the site refused the crawler when bot protection answers 403 (www.nacionale.com)', async () => {
+    const raw = async (url: string) => status(url, url.endsWith('/robots.txt') ? 404 : 403);
+    const err = await crawlSite('https://shielded.com', { fetch: raw }).catch((e) => e);
+    expect(err).toBeInstanceOf(SiteBlockedError);
+    expect(err.message).toMatch(/refused the crawler \(HTTP 403 for https:\/\/shielded.com\/sitemap.xml\)/);
+  });
+
+  it('still says "no sitemap" when every location is simply missing', async () => {
+    const raw = async (url: string) => status(url, 404);
+    await expect(crawlSite('https://plain.com', { fetch: raw })).rejects.toBeInstanceOf(SitemapNotFoundError);
   });
 });
